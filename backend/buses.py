@@ -69,19 +69,25 @@ def get_buses(date: Optional[str] = None, route_from: Optional[str] = None, rout
             pass
 
     buses = query.all()
-    if date:
-        valid_buses = []
-        now = datetime.now()
-        for bus in buses:
-            is_closed = False
-            if bus.departure_time:
-                if now >= bus.departure_time - timedelta(minutes=15):
-                    is_closed = True
-            if not is_closed:
+    now = datetime.now()
+    
+    valid_buses = []
+    for bus in buses:
+        if not bus.departure_time:
+            continue
+            
+        # 1. If it's a future day, it's always valid
+        if bus.departure_time.date() > now.date():
+            valid_buses.append(bus)
+        # 2. If it's today, it's only valid if departure is at least 15 mins in the future
+        elif bus.departure_time.date() == now.date():
+            if now < bus.departure_time - timedelta(minutes=15):
                 valid_buses.append(bus)
-        return valid_buses
-        
-    return buses
+        # 3. Past days are NEVER valid for searching/booking
+        else:
+            continue
+            
+    return valid_buses
 
 @router.post("/", response_model=schemas.BusResponse)
 def create_bus(bus: schemas.BusBase, db: Session = Depends(get_db)):
@@ -99,9 +105,10 @@ def get_bus_seats(bus_id: int, date: str, db: Session = Depends(get_db)):
     if bus and bus.departure_time:
         try:
             now = datetime.now()
-            time_obj = bus.departure_time.time()
             travel_date_obj = datetime.strptime(date, "%Y-%m-%d").date()
-            travel_dt = datetime.combine(travel_date_obj, time_obj)
+            travel_dt = datetime.combine(travel_date_obj, bus.departure_time.time())
+            
+            # Close booking if it's already departed or departing within 15 mins
             if now >= travel_dt - timedelta(minutes=15):
                 is_booking_closed = True
         except Exception:
